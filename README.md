@@ -1,4 +1,4 @@
-# Laboratório CVE-2026-114938 (Java4Shell)
+# CVE-2026-114938 (Java4Shell)
 
 Reprodução **local, sem AWS**, da corrupção de heap no intrinsic Base64 do OpenJDK
 HotSpot. Usa o Intel SDE para emular AVX-512 VBMI, porque o hardware desta máquina
