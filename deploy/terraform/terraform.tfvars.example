@@ -1,0 +1,4 @@
+region        = "us-east-1"
+instance_type = "c6i.large"
+key_name      = "minha-chave"
+allowed_cidr  = "203.0.113.10/32" # troque pelo seu IP publico
