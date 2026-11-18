@@ -58,5 +58,5 @@ o stub real. Isso tornou a reprodução possível em hardware doméstico.
 
 Reivindicar a primitiva como criação própria seria plágio e invalidaria o
 material em qualquer revisão técnica. A contribuição defensável é o método de
-verificação, a correção do comprimento e a instrumentação — e é ela que está
+verificação, a correção do comprimento e a instrumentação e é ela que está
 creditada acima.
