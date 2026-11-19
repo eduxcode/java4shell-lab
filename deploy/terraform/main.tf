@@ -33,17 +33,17 @@ data "aws_ami" "al2023" {
 
 resource "aws_security_group" "lab" {
   name_prefix = "j4s-lab-"
-  description = "Acesso restrito ao laboratorio CVE-2026-114938"
+  description = "Restricted access to the CVE-2026-114938 lab"
 
   ingress {
-    description = "SSH do operador"
+    description = "Operator SSH"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
     cidr_blocks = [var.allowed_cidr]
   }
 
-  # Sem 8080: o alvo escuta apenas em 127.0.0.1 dentro da instancia.
+  # No 8080: the target only listens on 127.0.0.1 inside the instance.
 
   egress {
     from_port   = 0
@@ -69,7 +69,7 @@ resource "aws_instance" "lab" {
   }
 
   metadata_options {
-    http_tokens = "required" # IMDSv2 obrigatorio
+    http_tokens = "required" # IMDSv2 required
   }
 
   tags = { Name = "j4s-lab" }

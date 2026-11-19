@@ -3,9 +3,9 @@ output "public_ip" {
 }
 
 output "ssh" {
-  value = "ssh -i <sua-chave.pem> ec2-user@${aws_instance.lab.public_ip}"
+  value = "ssh -i <your-key.pem> ec2-user@${aws_instance.lab.public_ip}"
 }
 
-output "lembrete" {
-  value = "DESTRUA ao terminar: terraform destroy"
+output "reminder" {
+  value = "DESTROY when done: terraform destroy"
 }

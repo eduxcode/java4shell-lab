@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Resolve o modo de execucao do laboratorio.
-#   SDE_MODE=1 -> Intel SDE local (emula AVX-512 VBMI) + JDK extraido do Docker
-#   SDE_MODE=0 -> Docker (host precisa de AVX-512 nativo)
+# Resolves the lab execution mode.
+#   SDE_MODE=1 -> local Intel SDE (emulates AVX-512 VBMI) + JDK extracted from Docker
+#   SDE_MODE=0 -> Docker (host needs native AVX-512)
 #
-# Uso: source demo/env.sh   (nao execute diretamente)
-# Autor do harness: eduxcode (github.com/eduxcode)
-# Primitiva: CVE-2026-114938 / Quang Luong - Calif.io
+# Usage: source demo/env.sh   (do not execute directly)
+# Lab author: eduxcode (github.com/eduxcode)
+# Primitive: CVE-2026-114938 / Quang Luong - Calif.io
 
 LAB="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TOOLS="$LAB/demo/.tools"

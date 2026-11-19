@@ -1,103 +1,116 @@
-# Deploy em instância com AVX-512
+# Deploying on an AVX-512 instance
 
-Este host (i5-8500) não executa o código vulnerável: falta `avx512vbmi`.
-O QEMU também não resolve — o TCG recusa as features.
+This is optional. The default lab (`./run-lab.sh`) already works on any x86-64
+Linux host through Intel SDE. Use this package when you want to run the vulnerable
+code on **native** AVX-512 VBMI hardware, or to test a container image.
+
+Hosts without `avx512vbmi` (for example an Intel i5-8500) do not execute the
+vulnerable code, and QEMU does not help: TCG refuses the features.
 
 ```
 qemu-x86_64: warning: TCG doesn't support requested feature: ...ECX.avx512vbmi [bit 1]
 vpermb=SIGILL
 ```
 
-KVM só ajudaria se o **host** tivesse AVX-512. Então a reprodução real precisa de
-hardware Ice Lake+ / Zen 4+.
+KVM only helps if the **host** has AVX-512, so a native reproduction needs
+Ice Lake+ / Zen 4+ hardware.
 
 ---
 
-## Opção 1 — instância que você já tem
+## Option 1: an instance you already have
 
 ```bash
-# 1) reempacote (sempre que alterar os fontes)
+# 1) repackage (whenever you change the sources)
 ./deploy/package.sh
 
-# 2) copie (troque <IP> e o caminho da chave)
-scp -i ~/.ssh/<SUA_CHAVE>.pem deploy/java4shell-lab.tgz ec2-user@<IP>:/tmp/
+# 2) copy (replace <IP> and the key path)
+scp -i ~/.ssh/<YOUR_KEY>.pem deploy/java4shell-lab.tgz ec2-user@<IP>:/tmp/
 
-# 3) execute o laboratorio
-ssh -i ~/.ssh/<SUA_CHAVE>.pem ec2-user@<IP> \
+# 3) run the lab
+ssh -i ~/.ssh/<YOUR_KEY>.pem ec2-user@<IP> \
   'mkdir -p ~/lab && tar xzf /tmp/java4shell-lab.tgz -C ~/lab && ~/lab/deploy/run-on-instance.sh'
 ```
 
-`ec2-user` vale para Amazon Linux. Em Ubuntu/Debian use `ubuntu`; em Rocky/Alma, `rocky`/`almalinux`.
+`ec2-user` applies to Amazon Linux. On Ubuntu/Debian use `ubuntu`; on Rocky/Alma use
+`rocky`/`almalinux`.
 
-Se aparecer `permission denied ... docker.sock`, rode `newgrp docker` ou reconecte o SSH
-(o script também tenta `sudo -n` automaticamente).
+If you see `permission denied ... docker.sock`, run `newgrp docker` or reconnect
+SSH (the script also tries `sudo -n` automatically).
 
-O script aborta com status 2 se a CPU não tiver os quatro flags — antes de gastar tempo.
+The script aborts with status 2 if the CPU lacks any of the four flags, before
+spending any time.
 
-## Opção 2 — Terraform (AWS)
+## Option 2: Terraform (AWS)
 
 ```bash
 cd deploy/terraform
-cp terraform.tfvars.example terraform.tfvars   # edite key_name e allowed_cidr
+cp terraform.tfvars.example terraform.tfvars   # edit key_name and allowed_cidr
 terraform init && terraform plan
 terraform apply
 ```
 
-Depois copie o pacote e rode como na opção 1.
+Then copy the package and run it as in option 1.
 
-O Security Group libera **apenas SSH**, e só do seu `/32`. A porta 8080 não é aberta:
-o alvo publica em `127.0.0.1:8080` dentro da instância.
+The security group opens **only SSH**, and only from your `/32`. Port 8080 is not
+opened: the target publishes on `127.0.0.1:8080` inside the instance.
 
-### Tipos de instância
+### Instance types
 
-| Tipo | CPU | AVX-512 VBMI |
+| Type | CPU | AVX-512 VBMI |
 |---|---|---|
-| `c6i.large` / `m6i.large` | Ice Lake | sim |
-| `c7i.large` / `m7i.large` | Sapphire Rapids | sim |
-| `c7a` / `m7a` | EPYC Genoa | sim |
-| `t3`, `t2`, `m5` | — | **não** |
+| `c6i.large` / `m6i.large` | Ice Lake | yes |
+| `c7i.large` / `m7i.large` | Sapphire Rapids | yes |
+| `c7a` / `m7a` | EPYC Genoa | yes |
+| `t3`, `t2`, `m5` | n/a | **no** |
 
-`c6i.large` em `us-east-1` custa cerca de US$ 0,085/h. Use por poucas horas e destrua.
+`c6i.large` in `us-east-1` costs about US$ 0.085/h. Use it for a few hours and
+destroy it.
 
-## O que o script faz
+## What the script does
 
-| Passo | Verificação |
+| Step | Check |
 |---|---|
-| 1 | Gate dos 4 flags; aborta se faltar |
-| 2 | Versão do JDK e `UseAVX`/`UseBASE64Intrinsics` efetivos |
-| 3 | Build do alvo (`eclipse-temurin:17.0.6_10-jdk`) |
-| 4 | PoC bounded de 129 bytes: espera `REPRODUCED` (62 bytes OOB) |
-| 5 | Um disparo em `/decode-exact` (129 bytes); estado do container e `hs_err_pid` |
-| 6 | Restart com `-XX:-UseBASE64Intrinsics`; decode segue funcional |
-| 7 | Opcional: runtime corrigido via `PATCHED_IMAGE` |
-| 8 | `evidence/<timestamp>/report.md` + logs brutos |
+| 1 | Gate on the 4 flags; aborts if any is missing |
+| 2 | JDK version and effective `UseAVX`/`UseBASE64Intrinsics` |
+| 3 | Target build (`eclipse-temurin:17.0.6_10-jdk`) |
+| 4 | Bounded 129-byte PoC: expects `REPRODUCED` (62 bytes OOB) |
+| 5 | One shot on `/decode-exact` (129 bytes); container state and `hs_err_pid` |
+| 6 | Restart with `-XX:-UseBASE64Intrinsics`; decoding keeps working |
+| 7 | Optional: patched runtime via `PATCHED_IMAGE` |
+| 8 | `evidence/<timestamp>/report.md` + raw logs |
 
-## Teste de remediação
+## Testing your own image or a fix
 
-`PATCHED_IMAGE=eclipse-temurin:17.0.21.1_11-jdk ./deploy/run-on-instance.sh`
+Use `JAVA_IMG` to test any runtime image, and `PATCHED_IMAGE` for the remediation
+check:
 
-A tag corrigida do Temurin ainda não estava publicada no Docker Hub em 2026-11-18
-(as disponíveis param em `17.0.21_9`, que é vulnerável). Enquanto isso:
-
-- controle negativo: `-XX:-UseBASE64Intrinsics` (passo 6);
-- ou use o tarball oficial da Oracle/Corretto `17.0.21.1` como `PATCHED_IMAGE`, se você
-  construir a imagem.
-
-## Resultado esperado em hardware elegível
-
-```
-PoC bounded ......... REPRODUCED  (changed=160, janela=[96,159], OOB=62)
-/decode-exact 129 ... victim_len negativo; JVM cai (DoS)
-+ hs_err_pid ........ SIGSEGV no G1 ao percorrer o header corrompido
-workaround .......... victim_len=256 / invalid base64, sem corrupção
+```bash
+JAVA_IMG=<your-jdk-image> ./deploy/run-on-instance.sh
+PATCHED_IMAGE=eclipse-temurin:17.0.21.1_11-jdk ./deploy/run-on-instance.sh
 ```
 
-Não espere RCE: a escrita é de conteúdo fixo e a cadeia completa não é pública.
+A patched Temurin tag was not yet published on Docker Hub as of 2026-11-18 (the
+available tags stop at `17.0.21_9`, which is vulnerable). Meanwhile:
 
-## Limpeza
+- negative control: `-XX:-UseBASE64Intrinsics` (step 6);
+- or build an image from the official Oracle/Corretto `17.0.21.1` tarball and pass
+  it as `PATCHED_IMAGE`.
+
+## Expected result on eligible hardware
+
+```
+bounded PoC ......... REPRODUCED  (changed=160, window=[96,159], OOB=62)
+/decode-exact 129 ... negative victim_len; JVM crashes (DoS)
++ hs_err_pid ........ SIGSEGV in G1 while walking the corrupted header
+workaround .......... victim_len=256 / invalid base64, no corruption
+```
+
+Do not expect RCE: the write has fixed content and the full chain is not public.
+
+## Cleanup
 
 ```bash
 cd deploy/terraform && terraform destroy
 ```
 
-Confirme no console da cloud que a instância e o Security Group sumiram.
+Confirm in the cloud console that the instance and the security group are gone.

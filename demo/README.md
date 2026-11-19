@@ -1,101 +1,95 @@
-# Demo em dois terminais — CVE-2026-114938
+# Two-terminal walkthrough: CVE-2026-114938
 
-Kit de gravação curta: um painel mostra o **alvo**, o outro mostra o **atacante**.
-Roda **sem AWS**, com AVX-512 VBMI emulado pelo Intel SDE.
+A guided walkthrough with two terminals: one shows the **target**, the other the
+**attacker**. It runs locally with AVX-512 VBMI emulated by Intel SDE, so no cloud
+account or special hardware is required.
 
-- Harness, alvo, oráculo e roteiro: **eduxcode** (github.com/eduxcode)
-- Primitiva do gatilho: **Quang Luong / Calif.io** (CVE-2026-114938)
-
-O gatilho é pesquisa publicada. O que é autoral aqui é a instrumentação: o
-oráculo que deriva o comprimento correto e a janela exata, os contadores por
-endpoint, a vítima alocada após o buffer e a captura automática de `hs_err`.
-Mantenha a atribuição no vídeo ela sustenta a credibilidade.
+The trigger primitive is published research (Quang Luong / Calif.io). What this
+repository adds is the instrumentation around it: the oracle that derives the
+correct trigger length and write window, per-endpoint counters, a victim object
+allocated right after the buffer, and automatic `hs_err` capture.
 
 ---
 
-## 1. Preparação (uma vez)
+## 1. Setup (once)
 
 ```bash
 ./demo/setup-sde.sh
 ```
 
-O script:
+The script:
 
-1. baixa o Intel SDE 10.13.1 (~37 MB) para `demo/.tools/`;
-2. extrai o JDK 17.0.21 da imagem `eclipse-temurin:17.0.21_9-jdk` (via Docker);
-3. compila alvo e PoCs em `demo/.build/`;
-4. confirma que a JVM sob SDE reporta `UseAVX = 3`.
+1. downloads Intel SDE 10.13.1 (~37 MB) into `demo/.tools/`;
+2. extracts JDK 17.0.21 from the `eclipse-temurin:17.0.21_9-jdk` image (via Docker);
+3. compiles the target and the PoCs into `demo/.build/`;
+4. confirms that the JVM under SDE reports `UseAVX = 3`.
 
-Requisitos: `curl`, `tar`, `docker`, `python3`. Para gravar: `tmux` e,
-opcionalmente, `asciinema`.
+Requirements: Linux x86-64, `curl`, `tar`, `docker`, `python3`, and `tmux` for the
+single-command mode.
 
-## 2. Execução
+## 2. Running
 
-### Opção A — um comando (tmux)
+### Option A: one command (tmux)
 
 ```bash
 ./demo/run-demo.sh
 ```
 
-### Opção B — dois terminais
+### Option B: two terminals
 
 ```bash
-# Terminal 1 (alvo)
+# Terminal 1: target
 ./demo/target.sh
 
-# Terminal 2 (atacante) — espere o "NO AR" no terminal 1
+# Terminal 2: attacker (wait until terminal 1 reports it is up)
 ./demo/attacker.sh
 ```
 
-O alvo sobe em `127.0.0.1:8080`. Nada sai da máquina.
+The target listens on `127.0.0.1:8080`. Nothing leaves the machine.
 
-> **Tempo de subida:** sob emulação, a JVM leva ~25–30 s para responder.
-> Comece o alvo antes de gravar e corte a espera na edição, ou deixe o painel
-> do alvo aparecendo com o banner e os primeiros `health`.
+> **Startup time:** under emulation the JVM takes roughly 25-30 seconds to start
+> answering requests.
 
-## 3. O que observar em cada painel
+## 3. What to look for
 
-### Painel do ALVO (`target.sh`)
+### Target pane (`target.sh`)
 
-| Momento | O que deve aparecer |
+| Stage | Expected output |
 |---|---|
-| Subida | `modo: Intel SDE (AVX-512 VBMI emulado)` |
-| No ar | `NO AR: {"runtime":"17.0.21+9",...}` |
-| Baseline | `ok` incrementa, `bad` fica igual |
-| Gatilho | `bad` incrementa e o processo morre |
-| Queda | `>>> ALVO CAIU` + `SIGSEGV` + `hs_err` na tela |
+| Startup | `mode: Intel SDE (AVX-512 VBMI emulated)` |
+| Up | A `/health` line with the runtime, e.g. `17.0.21+9` |
+| Baseline | `ok` counter increments, `bad` stays the same |
+| Trigger | `bad` increments and the process dies |
+| Crash | `SIGSEGV` and the captured `hs_err` file |
 
-O contador em `/health` é o sinal visual mais forte: prova que a requisição
-chegou na aplicação, não que o vídeo foi cortado.
+The `/health` counters show that each request reached the application.
 
-### Painel do ATACANTE (`attacker.sh`)
+### Attacker pane (`attacker.sh`)
 
-| Momento | O que deve aparecer |
+| Stage | Expected output |
 |---|---|
-| Gate | `AVX-512 VBMI: EMULADO via Intel SDE` |
+| Gate | `AVX-512 VBMI: EMULATED via Intel SDE` |
 | Payload | `128x'A' + '=' -> 129 bytes` |
 | Baseline | `http=200 {"decoded":48}` |
-| Mecanismo | `outMask=ffffffffffffffff` |
-| Oráculo | `[HIT] ... buffer=98 ... cauda=[96,159] OOB=62` |
-| Disparo | `http=400 ... "victim_len":-1700370022` |
-| Queda | `ALVO NAO RESPONDE -> a JVM caiu` |
+| Mechanism | `outMask=ffffffffffffffff` |
+| Oracle | `[HIT] ... buffer=98 ... tail=[96,159] OOB=62` |
+| Trigger | `http=400 ... "victim_len":-1700370022` |
+| Result | Target stops responding: the JVM crashed |
 
-## 4. Expectativa por cenário
+## 4. Expected result by environment
 
-| Cenário | O que o vídeo mostra |
+| Environment | Outcome |
 |---|---|
-| **Esta máquina + SDE** | `HIT`, `OOB=62`, queda da JVM + `hs_err` |
-| Host sem AVX-512 e sem SDE | metodologia + `sem corrupção` |
-| Instância com AVX-512 nativo | o mesmo `HIT`, sem emulação |
+| Any x86-64 Linux host + SDE | `HIT`, `OOB=62`, JVM crash and `hs_err` |
+| Host without AVX-512 and without SDE | Methodology only; no corruption |
+| Native AVX-512 VBMI instance | Same `HIT`, no emulation |
 
-## 5. O que o vídeo prova — e o que não prova
+## 5. What the walkthrough demonstrates, and what it does not
 
-**Prova:** a aplicação executa o decodificador vetorizado; uma entrada Base64
-malformada de 129 bytes provoca a escrita de 64 bytes em `dp=96`, 62 além do
-buffer de 98; o header do objeto vizinho é sobrescrito e a JVM cai.
+**Demonstrates:** the application runs the vectorized decoder; a malformed
+129-byte Base64 input causes a 64-byte store at `dp=96`, 62 bytes beyond the
+98-byte buffer; the neighboring object header is overwritten and the JVM crashes.
 
-**Não prova:** execução remota de código. A escrita tem conteúdo fixo e a cadeia
-completa (writer/reader → Code Cache) não é pública. Titule como
-**corrupção de heap reproduzida**, não como RCE. O impacto defensável é:
-corrupção de memória determinística + advisory do fornecedor (CVSS 8.1) +
-indisponibilidade demonstrada.
+**Does not demonstrate:** remote code execution. The written bytes are fixed and
+the full chain (writer/reader primitive toward the code cache) is not public. The
+accurate description is **reproduced heap corruption with denial of service**.

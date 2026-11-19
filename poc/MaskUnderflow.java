@@ -1,15 +1,15 @@
 /**
- * Reproduz a aritmetica de mascara do intrinsic Base64 x86-64 do HotSpot
- * exatamente como descrita por Quang Luong (Calif.io).
+ * Reproduces the mask arithmetic of HotSpot's x86-64 Base64 intrinsic
+ * exactly as described by Quang Luong (Calif.io).
  *
- * Nao depende de AVX-512: e a mesma conta, em Java puro. Serve para provar
- * a causa raiz (underflow de comprimento) em qualquer CPU.
+ * It does not depend on AVX-512: it is the same computation in pure Java. It
+ * proves the root cause (length underflow) on any CPU.
  */
 public final class MaskUnderflow {
 
-    /** Emula BZHI: zera todos os bits a partir da posicao "index". */
+    /** Emulates BZHI: clears all bits from position "index" upward. */
     static long bzhiq(long src, long index) {
-        if (index < 0 || index >= 64) return src;   // nada a zerar
+        if (index < 0 || index >= 64) return src;   // nothing to clear
         if (index == 0) return 0;
         return src & ((1L << index) - 1);
     }
@@ -33,16 +33,16 @@ public final class MaskUnderflow {
 
         System.out.printf("tail=%-5s inLen=%d outLen=%3d outMask=%016x %s%n",
                 "\"" + input + "\"", inLen, outLen, outMask,
-                allOnes ? "<-- MASCARA TOTAL: store de 64 bytes" : "");
+                allOnes ? "<-- FULL MASK: 64-byte store" : "");
     }
 
     public static void main(String[] args) {
-        System.out.println("Aritmetica do tail do intrinsic Base64 (HotSpot x86-64)");
-        System.out.println("output_len := (inLen / 4) * 3;  se houver '=', output_len -= 1");
+        System.out.println("Tail arithmetic of the Base64 intrinsic (HotSpot x86-64)");
+        System.out.println("output_len := (inLen / 4) * 3;  if there is a '=', output_len -= 1");
         System.out.println();
 
-        // Cauda final de um input de 65 bytes: 64 x 'A' + '='.
-        // O bloco de 64 bytes ja foi consumido; sobra apenas o '='.
+        // Final tail of a 65-byte input: 64 x 'A' + '='.
+        // The 64-byte block was already consumed; only the '=' remains.
         tail("=");
         tail("==");
         tail("X=");
@@ -51,28 +51,28 @@ public final class MaskUnderflow {
         tail("===");
 
         System.out.println();
-        // Efeito pratico para o input de 65 chars do advisory.
+        // Practical effect for the advisory's 65-char input.
         int inLen = 65;                 // 64 x 'A' + '='
-        // A JDK aloca (ceil(inLen/4) * 3) - padding = (17*3) - 1 = 50 bytes.
+        // The JDK allocates (ceil(inLen/4) * 3) - padding = (17*3) - 1 = 50 bytes.
         int bufferLen = (int) Math.ceil(inLen / 4.0) * 3 - 1;
-        int destOffset = 48;            // dp apos o bloco de 64 bytes
-        int writeBytes = 64;            // evmovdqub com mascara -1
+        int destOffset = 48;            // dp after the 64-byte block
+        int writeBytes = 64;            // evmovdqub with mask -1
         int writeEnd = destOffset + writeBytes - 1;
 
         System.out.println("input = 64x'A' + '='  (65 bytes)");
-        System.out.println("buffer alocado pela JDK      = " + bufferLen + " bytes");
-        System.out.println("offset de destino (dp)       = " + destOffset);
-        System.out.println("bytes escritos pela store    = " + writeBytes);
-        System.out.println("intervalo escrito            = [" + destOffset + ", " + writeEnd + "]");
-        System.out.println("bytes dentro do buffer       = " + (bufferLen - destOffset));
-        System.out.println("bytes FORA do buffer         = " + (writeEnd - bufferLen + 1));
+        System.out.println("buffer allocated by the JDK  = " + bufferLen + " bytes");
+        System.out.println("destination offset (dp)      = " + destOffset);
+        System.out.println("bytes written by the store    = " + writeBytes);
+        System.out.println("range written                 = [" + destOffset + ", " + writeEnd + "]");
+        System.out.println("bytes inside the buffer       = " + (bufferLen - destOffset));
+        System.out.println("bytes OUTSIDE the buffer      = " + (writeEnd - bufferLen + 1));
         System.out.println();
 
         int oob = writeEnd - bufferLen + 1;
         if (oob == 62) {
-            System.out.println("UNDERFLOW CONFIRMADO: 62 bytes escritos alem do array");
+            System.out.println("UNDERFLOW CONFIRMED: 62 bytes written past the array");
         } else {
-            System.out.println("inesperado: oob=" + oob);
+            System.out.println("unexpected: oob=" + oob);
             System.exit(1);
         }
     }

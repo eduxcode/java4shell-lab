@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Painel do ALVO (terminal 2).
-# Modo padrao nesta maquina: JDK 17.0.21 sob Intel SDE (AVX-512 VBMI emulado).
-# Sem SDE instalado, cai para Docker (exige AVX-512 nativo no host).
+# TARGET pane (terminal 1).
+# Default mode: JDK 17.0.21 under Intel SDE (emulated AVX-512 VBMI).
+# Without SDE installed, falls back to Docker (requires native AVX-512 on the host).
 #
-# Autor do harness: eduxcode (github.com/eduxcode)
-# Primitiva: CVE-2026-114938 - Quang Luong / Calif.io
+# Lab author: eduxcode (github.com/eduxcode)
+# Primitive: CVE-2026-114938 - Quang Luong / Calif.io
 set -uo pipefail
 LAB="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$LAB"
@@ -20,17 +20,17 @@ mkdir -p "$EVID"
 printf '\033[1;35m'
 cat <<'EOF'
 +--------------------------------------------------------------+
-|  ALVO  -  OpenJDK 17.0.21 / POST /decode-exact               |
-|  harness: eduxcode (github.com/eduxcode)                     |
-|  primitiva: CVE-2026-114938                                  |
+|  TARGET  -  OpenJDK 17.0.21 / POST /decode-exact             |
+|  lab: eduxcode (github.com/eduxcode)                         |
+|  primitive: CVE-2026-114938                                  |
 +--------------------------------------------------------------+
 EOF
 printf '\033[0m\n'
 
 if [ "$SDE_MODE" = 1 ]; then
-  echo "modo: Intel SDE (AVX-512 VBMI emulado) - sem AWS, 100% local"
+  echo "mode: Intel SDE (AVX-512 VBMI emulated) - no cloud, 100% local"
   echo "jdk : $("$J4S_JAVA" -version 2>&1 | head -1)"
-  "$J4S_JAVAC" -d "$J4S_BUILD" "$LAB/target/DecodeServer.java" || { echo "build falhou"; exit 1; }
+  "$J4S_JAVAC" -d "$J4S_BUILD" "$LAB/target/DecodeServer.java" || { echo "build failed"; exit 1; }
   "$SDE" -icx -- "$J4S_JAVA" "${J4S_FLAGS[@]}" \
       -XX:ErrorFile="$EVID/hs_err_%p.log" \
       -Dwarmup=5000 -Dport="$PORT" \
@@ -38,30 +38,30 @@ if [ "$SDE_MODE" = 1 ]; then
   TARGET_PID=$!
   trap 'kill "$TARGET_PID" 2>/dev/null' EXIT
 else
-  echo "modo: Docker (host precisa de AVX-512 VBMI nativo)"
+  echo "mode: Docker (host needs native AVX-512 VBMI)"
   docker rm -f "$NAME" >/dev/null 2>&1 || true
-  docker build -q -t "$IMG" ./target >/dev/null || { echo "build falhou"; exit 1; }
+  docker build -q -t "$IMG" ./target >/dev/null || { echo "build failed"; exit 1; }
   docker run -d --name "$NAME" -p "127.0.0.1:${PORT}:8080" \
     -e JAVA_OPTS="-XX:ErrorFile=/app/hs_err_%p.log" "$IMG" >/dev/null
   trap 'docker rm -f "$NAME" >/dev/null 2>&1' EXIT
 fi
 
-echo "aguardando o alvo subir (warmup curto + emulacao)..."
+echo "waiting for the target to start (short warmup + emulation)..."
 for _ in $(seq 1 120); do
   curl -sf -m 2 "$BASE/health" >/dev/null 2>&1 && break
   sleep 1
 done
 
 if ! curl -sf -m 2 "$BASE/health" >/dev/null 2>&1; then
-  echo "alvo nao subiu"
+  echo "target did not start"
   [ "$SDE_MODE" = 1 ] && tail -20 "$EVID/target.log"
   [ "$SDE_MODE" = 0 ] && docker logs --tail 20 "$NAME" 2>&1
   exit 1
 fi
 
-echo "NO AR: $(curl -s "$BASE/health")"
+echo "UP: $(curl -s "$BASE/health")"
 echo
-echo "monitorando /health a cada 2s."
+echo "polling /health every 2s."
 echo
 
 START=$(date +%s)
@@ -74,8 +74,8 @@ while :; do
 
   if [ "$STATE" != "running" ]; then
     echo
-    echo ">>> ALVO CAIU (status=$STATE) apos $(( $(date +%s) - START ))s"
-    echo ">>> ultimas linhas:"
+    echo ">>> TARGET CRASHED (status=$STATE) after $(( $(date +%s) - START ))s"
+    echo ">>> last lines:"
     if [ "$SDE_MODE" = 1 ]; then
       wait "$TARGET_PID" 2>/dev/null
       tail -25 "$EVID/target.log" 2>&1
@@ -88,11 +88,11 @@ while :; do
     HS=$(ls "$EVID"/hs_err_*.log 2>/dev/null | head -1)
     if [ -n "${HS:-}" ]; then
       echo
-      echo ">>> hs_err capturado: $HS"
+      echo ">>> hs_err captured: $HS"
       grep -E '^#  SIG|^# JRE version|^# Problematic|^# V  \[' "$HS" | head -6
     fi
     echo
-    echo ">>> evidencia salva em $EVID"
+    echo ">>> evidence saved to $EVID"
     break
   fi
 

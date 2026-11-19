@@ -1,62 +1,64 @@
-# Créditos e proveniência
+# Credits and provenance
 
-## Descoberta e pesquisa original
+## Original discovery and research
 
-- **Quang Luong** — descoberta, write-up e cadeias de exploração.
-- **Calif.io** — divulgação de CVE-2026-114938 ("Java4Shell"), advisory técnico
-  e PoC de referência.
-- **Jenish Rakholiya** — melhoria do exploit.
-- **Oracle** — CNA do CVE e correção (respsins de 2026-11-17).
+- **Quang Luong**: discovery, write-up and exploitation chains.
+- **Calif.io**: disclosure of CVE-2026-114938 ("Java4Shell"), technical advisory
+  and reference PoC.
+- **Jenish Rakholiya**: exploit improvements.
+- **Oracle**: CNA for the CVE and author of the fix (respins of 2026-11-17).
 
-A primitiva usada neste laboratório o underflow em `bzhiq`/`evmovdqub` no
-tratamento da cauda do intrinsic Base64 é derivada desse trabalho publicado.
-Ela é reproduzida aqui com atribuição.
+The primitive used in this lab, the `bzhiq`/`evmovdqub` underflow in the tail
+handling of the Base64 intrinsic, is derived from that published work and is
+reproduced here with attribution.
 
-## Trabalho autoral deste repositório
+## Original work in this repository
 
-**eduxcode** — https://github.com/eduxcode
+**eduxcode**: https://github.com/eduxcode
 
-### 1. Correção empírica do gatilho
+### 1. Empirical correction of the trigger
 
-O advisory menciona `64x'A'+'='` e `128x'A'+'='`. Medindo o stub
-`generate_base64_decodeBlock` do HotSpot, essas entradas **não alcançam o
-código vetorizado**: o gate é `length > 128`, e abaixo disso o loop escalar
-trata a cauda em Java.
+The advisory mentions `64x'A' + '='` and `128x'A' + '='`. Measuring HotSpot's
+`generate_base64_decodeBlock` stub shows that those inputs **do not reach the
+vectorized code**: the gate is `length > 128`, and below it the scalar loop
+handles the tail in Java.
 
-Este repositório deriva e valida o gatilho que realmente dispara:
+This repository derives and validates the input that does trigger the bug:
 
 - **129 bytes** (`128x'A' + '='`);
-- condição geral: `length > 128` e `length % 64 ∈ {1,2,3}`;
-- janela da store: `dp = 48 * (length / 64)`, 64 bytes;
-- buffer alocado pela JDK: `3*ceil(length/4) - paddings`;
-- resultado: 62 bytes além do buffer de 98 (`dp=96`, store até 159).
+- general condition: `length > 128` and `length % 64 ∈ {1, 2, 3}`;
+- store window: `dp = 48 * (length / 64)`, 64 bytes;
+- buffer allocated by the JDK: `3 * ceil(length / 4) - paddings`;
+- result: 62 bytes past the 98-byte buffer (`dp = 96`, store up to 159).
 
-Também documenta que **128 bytes** (127 `A` + `=`) é entrada **válida** —
-decodifica 95 bytes e não lança exceção, o que explica o falso negativo.
+It also documents that **128 bytes** (127 `A` + `=`) is a **valid** input that
+decodes 95 bytes without throwing, which explains the false negatives.
 
-### 2. Instrumentação
+### 2. Instrumentation
 
-- `poc/Oracle.java` — oráculo que deriva o comprimento e a janela, mede
-  primeiro/último byte e valida a contagem, em vez de "algo mudou".
-- `poc/MaskUnderflow.java` — emulação da aritmética da máscara em Java puro,
-  permitindo demonstrar a causa raiz em CPU sem AVX-512.
-- `target/DecodeServer.java` — alvo com contadores por endpoint, caminho
-  realista (`/decode`), caminho seguro (`/decode-safe`) e caminho determinístico
-  (`/decode-exact`, com vítima alocada após o buffer).
-- `demo/` — setup do Intel SDE, fluxo de dois painéis, captura automática de
-  `hs_err` e roteiro de gravação.
-- `deploy/` — pacote opcional para instância com AVX-512 nativo e Terraform.
+- `poc/Oracle.java`: oracle that derives the length and the window, measures the
+  first and last byte, and validates the count, instead of reporting "something
+  changed".
+- `poc/MaskUnderflow.java`: mask arithmetic emulated in pure Java, showing the
+  root cause on CPUs without AVX-512.
+- `target/DecodeServer.java`: target with per-endpoint counters, a realistic path
+  (`/decode`), a safe path (`/decode-safe`) and a deterministic path
+  (`/decode-exact`, with a victim object allocated after the buffer).
+- `demo/`: Intel SDE setup, two-pane workflow, automatic `hs_err` capture and
+  walkthrough.
+- `deploy/`: optional package for a native AVX-512 instance, with Terraform.
 
-### 3. Caminho de execução sem AWS
+### 3. Cloud-free execution path
 
-O host deste laboratório (i5-8500) não possui AVX-512. QEMU TCG não emula as
-instruções. O repositório usa o **Intel SDE 10.13.1** (gratuito) para emular
-VBMI e reescrever o CPUID, permitindo que a JVM reporte `UseAVX = 3` e execute
-o stub real. Isso tornou a reprodução possível em hardware doméstico.
+The original development host (an Intel i5-8500) has no AVX-512, and QEMU TCG does
+not emulate the required instructions. The repository uses the free
+**Intel SDE 10.13.1** to emulate VBMI and rewrite CPUID, so the JVM reports
+`UseAVX = 3` and executes the real stub. This makes the reproduction possible on
+ordinary consumer hardware.
 
-## Por que a atribuição fica
+## Why attribution stays
 
-Reivindicar a primitiva como criação própria seria plágio e invalidaria o
-material em qualquer revisão técnica. A contribuição defensável é o método de
-verificação, a correção do comprimento e a instrumentação e é ela que está
-creditada acima.
+Claiming the primitive as original work would be plagiarism and would not survive
+technical review. The defensible contribution is the verification method, the
+corrected trigger length and the instrumentation, and that is what is credited
+above.

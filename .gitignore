@@ -1,16 +1,11 @@
-# Ferramentas baixadas e artefatos de build (grandes, não versionar)
+# Downloaded tools and build artifacts (large, do not version)
 demo/.tools/
 demo/.build/
 
-# Evidências de execução
+# Execution evidence
 demo/evidence/
 deploy/evidence/
 deploy/java4shell-lab.tgz
-
-# Gravações
-*.cast
-*.mp4
-*.gif
 
 # Java
 *.class
@@ -24,5 +19,5 @@ replay_pid*.log
 terraform.tfvars
 crash.log
 
-# Sistema
+# System
 .DS_Store

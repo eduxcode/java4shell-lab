@@ -22,6 +22,6 @@ SOFTWARE.
 
 ---
 
-A primitiva de vulnerabilidade reproduzida neste laboratório (CVE-2026-114938)
-foi descoberta por Quang Luong / Calif.io e é usada aqui apenas para fins
-educacionais e defensivos. Ver CREDITS.md para a atribuição completa.
+The vulnerability primitive reproduced in this lab (CVE-2026-114938) was
+discovered by Quang Luong / Calif.io and is used here for educational and
+defensive purposes only. See CREDITS.md for full attribution.

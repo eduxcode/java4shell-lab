@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# Abre os dois paineis em tmux: alvo a esquerda, atacante a direita.
-# Autor do harness: eduxcode (github.com/eduxcode)
+# Opens the two tmux panes: target on the left, attacker on the right.
+# Lab author: eduxcode (github.com/eduxcode)
 set -euo pipefail
 LAB="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$LAB"
 source "$LAB/demo/env.sh"
 
 if [ "$SDE_MODE" != 1 ]; then
-  echo "SDE nao instalado: rode ./demo/setup-sde.sh uma vez."
-  echo "Sem SDE, o modo Docker exige AVX-512 nativo e nao vai reproduzir aqui."
-  echo "Alternativa manual:"
+  echo "SDE not installed: run ./demo/setup-sde.sh once."
+  echo "Without SDE, Docker mode requires native AVX-512 and will not reproduce here."
+  echo "Manual alternative:"
   echo "  T1: ./demo/target.sh"
   echo "  T2: ./demo/attacker.sh"
   exit 1
 fi
 
 if ! command -v tmux >/dev/null 2>&1; then
-  echo "tmux nao encontrado. Use dois terminais:"
+  echo "tmux not found. Use two terminals:"
   echo "  T1: ./demo/target.sh"
   echo "  T2: ./demo/attacker.sh"
   exit 1

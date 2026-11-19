@@ -11,13 +11,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Alvo instrumentado para CVE-2026-114938.
+ * Instrumented target for CVE-2026-114938.
  *
- * POST /decode       caminho realista: Base64.getDecoder().decode(String).
- *                    A JDK aloca o array com tamanho exato, entao o OOB write
- *                    cai no heap vizinho (pode corromper/crashar a JVM).
- * POST /decode-safe  mesma decodificacao em buffer de 4096 bytes: seguro.
- * GET  /health       runtime + contadores, para o painel do alvo no video.
+ * POST /decode       realistic path: Base64.getDecoder().decode(String).
+ *                    The JDK allocates the array with the exact size, so the OOB write
+ *                    lands in the neighboring heap (it can corrupt/crash the JVM).
+ * POST /decode-safe  same decoding into a 4096-byte buffer: safe.
+ * GET  /health       runtime + counters, shown in the target pane.
  */
 public class DecodeServer {
 
@@ -26,7 +26,7 @@ public class DecodeServer {
     static final AtomicLong BAD = new AtomicLong();
     static final AtomicLong OOB = new AtomicLong();
     static volatile long sink;
-    static volatile Object HOLD;   // impede scalar-replacement da vitima
+    static volatile Object HOLD;   // prevents scalar replacement of the victim
     static long startedAt;
 
     public static void main(String[] args) throws Exception {
@@ -50,7 +50,7 @@ public class DecodeServer {
             if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) { send(ex, 405, "POST only"); return; }
             String in = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.US_ASCII);
             try {
-                byte[] out = DEC.decode(in);          // alocacao interna: OOB real no heap
+                byte[] out = DEC.decode(in);          // internal allocation: real OOB in the heap
                 OK.incrementAndGet();
                 send(ex, 200, "{\"decoded\":" + out.length + "}");
             } catch (IllegalArgumentException e) {
@@ -62,10 +62,10 @@ public class DecodeServer {
         });
 
         /*
-         * /decode-exact: mesmo write do decode(String), mas com o buffer no
-         * tamanho exato que a JDK alocaria e uma vitima alocada logo depois.
-         * O store de 64 bytes em data[dp] invade o header do objeto seguinte,
-         * tornando a corrupcao observavel (victim_len != 256) e fatal no GC.
+         * /decode-exact: same write as decode(String), but with the buffer at
+         * the exact size the JDK would allocate and a victim allocated right after.
+         * The 64-byte store at data[dp] overruns the header of the next object,
+         * making the corruption observable (victim_len != 256) and fatal for the GC.
          */
         srv.createContext("/decode-exact", ex -> {
             if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) { send(ex, 405, "POST only"); return; }
@@ -77,12 +77,12 @@ public class DecodeServer {
                 if (in[len - 2] == '=') paddings++;
             }
             if (paddings == 0 && (len & 3) != 0) paddings = 4 - (len & 3);
-            int exact = 3 * ((len + 3) / 4) - paddings;   // decodedOutLength da JDK
+            int exact = 3 * ((len + 3) / 4) - paddings;   // JDK's decodedOutLength
 
             byte[] dst = new byte[Math.max(exact, 0)];
             byte[] victim = new byte[256];
             Arrays.fill(victim, (byte) 0x33);
-            HOLD = victim;                                  // forca alocacao no heap
+            HOLD = victim;                                  // forces heap allocation
 
             int n = -1;
             String err = null;
@@ -91,7 +91,7 @@ public class DecodeServer {
             } catch (IllegalArgumentException e) {
                 err = "invalid base64";
             }
-            int vlen = victim.length;                       // header pode estar corrompido
+            int vlen = victim.length;                       // header may be corrupted
             int v0 = victim[0] & 0xff;
 
             if (err == null) OK.incrementAndGet(); else BAD.incrementAndGet();
@@ -102,7 +102,7 @@ public class DecodeServer {
             if (vlen != 256 || v0 != 0x33) {
                 Thread t = new Thread(() -> {
                     try { Thread.sleep(300); } catch (InterruptedException ignored) { }
-                    System.gc();                            // proximo GC encontraria o mesmo
+                    System.gc();                            // the next GC would find the same
                 }, "gc-trigger");
                 t.setDaemon(true);
                 t.start();
@@ -125,16 +125,16 @@ public class DecodeServer {
 
         srv.setExecutor(Executors.newFixedThreadPool(4));
         srv.start();
-        System.out.println("[alvo] listening on " + port
+        System.out.println("[target] listening on " + port
                 + " runtime=" + System.getProperty("java.runtime.version"));
-        System.out.println("[alvo] warmup=" + Integer.getInteger("warmup", 200_000)
-                + " decodes (forca compilacao C2 do intrinsic)");
+        System.out.println("[target] warmup=" + Integer.getInteger("warmup", 200_000)
+                + " decodes (forces C2 compilation of the intrinsic)");
     }
 
     /**
-     * Aquece o decodificador ate o C2 selecionar o caminho otimizado.
-     * Usa 192 caracteres de proposito: o stub AVX-512 so e escolhido para
-     * entradas com length > 128; aquecer com 64 nao exercita o caminho real.
+     * Warms up the decoder until C2 selects the optimized path.
+     * It deliberately uses 192 characters: the AVX-512 stub is only chosen for
+     * inputs with length > 128; warming up with 64 does not exercise the real path.
      */
     static void warmup(int iters) {
         byte[] valid = "A".repeat(192).getBytes(StandardCharsets.US_ASCII);
