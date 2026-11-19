@@ -151,7 +151,7 @@ alvo ............................ SIGSEGV em G1RegionMarkStatsCache::add_live_wo
 
 O `victim_len` negativo é a prova visual: o header do objeto alocado logo após o
 buffer foi sobrescrito pelos 62 bytes. O `System.gc()` seguinte encontra o heap
-inconsistente e a JVM morre — um GC real faria o mesmo.
+inconsistente e a JVM morre, um GC real faria o mesmo.
 
 ## 7. Estrutura
 
