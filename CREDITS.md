@@ -32,7 +32,7 @@ Este repositório deriva e valida o gatilho que realmente dispara:
 - resultado: 62 bytes além do buffer de 98 (`dp=96`, store até 159).
 
 Também documenta que **128 bytes** (127 `A` + `=`) é entrada **válida** —
-decodifica 95 bytes e não lança exceção —, o que explica o falso negativo.
+decodifica 95 bytes e não lança exceção, o que explica o falso negativo.
 
 ### 2. Instrumentação
 
